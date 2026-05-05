@@ -3,6 +3,8 @@
 # Build artifacts
 dist/
 build/bithumbSplit/
+_build/
+_dist/
 
 # Logs
 *.log
@@ -12,7 +14,6 @@ logs/
 .env
 .vscode/
 .idea/
-*.spec
 
 # Python
 __pycache__/
