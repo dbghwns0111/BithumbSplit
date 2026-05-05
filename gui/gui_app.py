@@ -36,6 +36,9 @@ from config.settings import (
     SUPPORTED_COINS, MIN_AMOUNT, MAX_AMOUNT, MIN_LEVELS, MAX_LEVELS,
     MIN_GAP, MAX_GAP, PRICE_UPDATE_INTERVAL, REQUIRED_DIRS
 )
+from strategy.auto_trade import calculate_price
+from config.tick_table import get_tick_size
+import math
 
 # 필수 디렉토리 생성
 for dir_name in REQUIRED_DIRS:
@@ -559,105 +562,116 @@ entry_resume_level.grid(row=2, column=1, padx=(12, 25), sticky="ew")
 summary_labels["market"] = ctk.CTkLabel(grid_config, text="대상: -", font=FONT_LABEL, text_color=COLOR_MUTED)
 summary_labels["market"].grid(row=2, column=2, columnspan=2, sticky="w")
 
-# 재시작 차수 검증 및 권장 차수 계산 함수
+# 재시작 차수 검증 및 권장 차수 계산 함수 (개선판)
 def update_resume_price_info(*args):
     try:
-        from strategy.auto_trade import calculate_price
-        from config.tick_table import get_tick_size
-        import math
-        
-        # 입력값 읽기
-        coin = entry_market.get().strip().upper()
-        if not coin:
-            summary_labels["market"].configure(text="대상: 코인을 입력하세요", text_color=COLOR_MUTED)
+        # 입력값 읽기 및 기본 검증
+        coin_raw = entry_market.get().strip().upper()
+        if not coin_raw:
+            summary_labels["market"].configure(text="💡 코인명을 입력해 주세요 (예: BTC)", text_color=COLOR_MUTED)
             return
             
+        market = f"KRW-{coin_raw}"
+        
         try:
-            start_price = float(entry_price.get())
-            max_rounds = int(entry_rounds.get())
-            buy_gap = float(entry_buy_gap.get())
-            sell_gap = float(entry_sell_gap.get())
+            val_start_price = entry_price.get().strip()
+            val_rounds = entry_rounds.get().strip()
+            val_buy_gap = entry_buy_gap.get().strip()
+            val_sell_gap = entry_sell_gap.get().strip()
+            
+            if not all([val_start_price, val_rounds, val_buy_gap, val_sell_gap]):
+                summary_labels["market"].configure(text="💡 모든 설정값을 입력하면 분석이 시작됩니다", text_color=COLOR_MUTED)
+                return
+                
+            start_price = float(val_start_price)
+            max_rounds = int(val_rounds)
+            buy_gap_val = float(val_buy_gap)
+            sell_gap_val = float(val_sell_gap)
             buy_mode_val = buy_mode.get()
             sell_mode_val = sell_mode.get()
         except ValueError:
+            summary_labels["market"].configure(text="⚠️ 숫자 형식으로 입력해 주세요", text_color="#FFB020")
             return
 
-        market = f"KRW-{coin}"
         tick = get_tick_size(market)
         current_price = get_current_price(market)
         
         if not current_price:
-            summary_labels["market"].configure(text="⚠️ 현재가 조회 불가", text_color="orange")
+            summary_labels["market"].configure(text="📡 현재가 정보를 가져오는 중...", text_color="orange")
             return
 
-        # 1. 현재가 기준 권장 차수 계산
+        # 1. 권장 차수 자동 계산
         recommended_level = 1
+        found_recommendation = False
         for lv in range(1, max_rounds + 1):
-            lv_buy_raw = calculate_price(start_price, buy_gap * (lv - 1), buy_mode_val, 'down')
+            lv_buy_raw = calculate_price(start_price, buy_gap_val * (lv - 1), buy_mode_val, 'down')
             lv_buy = math.floor(lv_buy_raw / tick) * tick
             
-            # 이전 차수 매도가 (lv가 1이면 시작가 기준)
+            # 상단 경계값 결정 (lv 1이면 시작가, 아니면 이전 차수 매도가)
             if lv == 1:
-                upper_bound = start_price + (tick * 10) # 넉넉하게
+                upper_bound = start_price * 1.5 # 넉넉한 범위
             else:
-                prev_buy_raw = calculate_price(start_price, buy_gap * (lv - 2), buy_mode_val, 'down')
+                prev_buy_raw = calculate_price(start_price, buy_gap_val * (lv - 2), buy_mode_val, 'down')
                 prev_buy = math.floor(prev_buy_raw / tick) * tick
-                prev_sell_raw = calculate_price(prev_buy, sell_gap, sell_mode_val, 'up')
+                prev_sell_raw = calculate_price(prev_buy, sell_gap_val, sell_mode_val, 'up')
                 upper_bound = math.floor(prev_sell_raw / tick) * tick
             
             if lv_buy <= current_price <= upper_bound:
                 recommended_level = lv
+                found_recommendation = True
                 break
             elif current_price < lv_buy:
-                recommended_level = lv # 더 내려간 경우
+                recommended_level = lv
+                found_recommendation = True
+                if lv == max_rounds: break
 
-        # 2. 유저가 입력한 재시작 차수 검증
-        resume_level_val = entry_resume_level.get().strip()
+        # 2. 유저 입력값 검증
+        resume_level_raw = entry_resume_level.get().strip()
         
-        # 입력값이 없으면 권장 차수만 안내
-        if not resume_level_val or resume_level_val == "0":
-            summary_labels["market"].configure(
-                text=f"💡 권장 재시작: {recommended_level}차 (현재가 {current_price:,.0f})", 
-                text_color="#7B9FFF"
-            )
+        # 입력이 없거나 0인 경우 추천 메시지 표시
+        if not resume_level_raw or resume_level_raw == "0":
+            rec_text = f"💡 권장: {recommended_level}차 (현재 {current_price:,.0f})"
+            summary_labels["market"].configure(text=rec_text, text_color="#7B9FFF")
             if not running_flag: btn_start.configure(state="normal")
             return
 
-        resume_level = int(resume_level_val)
-        
-        # 선택한 차수의 가격 계산
-        target_buy_raw = calculate_price(start_price, buy_gap * (resume_level - 1), buy_mode_val, 'down')
+        try:
+            resume_level = int(resume_level_raw)
+        except ValueError:
+            summary_labels["market"].configure(text="⚠️ 차수는 숫자로 입력하세요", text_color="#FFB020")
+            return
+
+        # 입력한 차수의 가격 범위 계산
+        target_buy_raw = calculate_price(start_price, buy_gap_val * (resume_level - 1), buy_mode_val, 'down')
         target_buy = math.floor(target_buy_raw / tick) * tick
         
         prev_sell = None
         if resume_level > 1:
-            p_buy_raw = calculate_price(start_price, buy_gap * (resume_level - 2), buy_mode_val, 'down')
+            p_buy_raw = calculate_price(start_price, buy_gap_val * (resume_level - 2), buy_mode_val, 'down')
             p_buy = math.floor(p_buy_raw / tick) * tick
-            p_sell_raw = calculate_price(p_buy, sell_gap, sell_mode_val, 'up')
+            p_sell_raw = calculate_price(p_buy, sell_gap_val, sell_mode_val, 'up')
             prev_sell = math.floor(p_sell_raw / tick) * tick
 
-        # 검증 로직
+        # 위험 상태 검사
         is_safe = True
-        status_msg = ""
-        
         if current_price <= target_buy:
             is_safe = False
-            status_msg = f"❌ {resume_level}차 매수({target_buy:,.0f}) 이하! 즉시체결 위험"
+            error_msg = f"❌ {resume_level}차 즉시매수 위험 (매수가: {target_buy:,.0f})"
+            summary_labels["market"].configure(text=error_msg, text_color="#FF4B4B")
         elif prev_sell and current_price >= prev_sell:
             is_safe = False
-            status_msg = f"❌ {resume_level-1}차 매도({prev_sell:,.0f}) 이상! 즉시체결 위험"
+            error_msg = f"❌ {resume_level-1}차 즉시매도 위험 (매도가: {prev_sell:,.0f})"
+            summary_labels["market"].configure(text=error_msg, text_color="#FF4B4B")
         else:
-            status_msg = f"✅ {resume_level}차 시작 가능 (매수: {target_buy:,.0f})"
+            ok_msg = f"✅ {resume_level}차 진입 가능 (매수: {target_buy:,.0f})"
+            summary_labels["market"].configure(text=ok_msg, text_color=COLOR_ACCENT)
 
-        # UI 반영
-        summary_labels["market"].configure(text=status_msg, text_color=COLOR_ACCENT if is_safe else "#FF4B4B")
-        
         if not running_flag:
             btn_start.configure(state="normal" if is_safe else "disabled")
             
     except Exception as e:
-        print(f"[DEBUG] update_resume_price_info error: {e}")
-        summary_labels["market"].configure(text="대상: 데이터 확인 중...", text_color=COLOR_MUTED)
+        # 상세 에러 로깅은 하지 않고 사용자에게 최소한의 정보 제공
+        summary_labels["market"].configure(text="⌛ 데이터를 확인하고 있습니다...", text_color=COLOR_MUTED)
 
 
 # 구분선
