@@ -31,7 +31,7 @@ if str(base_path) not in sys.path:
 from strategy.auto_trade import run_auto_trade
 from utils.telegram import send_telegram_message
 from api.api import cancel_all_orders, get_current_price
-from shared.state import strategy_info
+from shared.state import strategy_info, update_strategy_info_batch, get_strategy_info
 from config.settings import (
     SUPPORTED_COINS, MIN_AMOUNT, MAX_AMOUNT, MIN_LEVELS, MAX_LEVELS,
     MIN_GAP, MAX_GAP, PRICE_UPDATE_INTERVAL, REQUIRED_DIRS
