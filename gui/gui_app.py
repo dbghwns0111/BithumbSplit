@@ -559,62 +559,105 @@ entry_resume_level.grid(row=2, column=1, padx=(12, 25), sticky="ew")
 summary_labels["market"] = ctk.CTkLabel(grid_config, text="대상: -", font=FONT_LABEL, text_color=COLOR_MUTED)
 summary_labels["market"].grid(row=2, column=2, columnspan=2, sticky="w")
 
-# 재시작 차수 입력 시 가격 정보 업데이트 함수
+# 재시작 차수 검증 및 권장 차수 계산 함수
 def update_resume_price_info(*args):
     try:
         from strategy.auto_trade import calculate_price
         from config.tick_table import get_tick_size
         import math
         
-        resume_level_val = entry_resume_level.get().strip()
-        if not resume_level_val or resume_level_val == "0":
-            summary_labels["market"].configure(text="대상: -", text_color=COLOR_MUTED)
-            return
-        
-        resume_level = int(resume_level_val)
-        start_price = float(entry_price.get())
-        buy_gap = float(entry_buy_gap.get())
-        sell_gap = float(entry_sell_gap.get())
-        buy_mode_val = buy_mode.get()
-        sell_mode_val = sell_mode.get()
+        # 입력값 읽기
         coin = entry_market.get().strip().upper()
-        if not coin: return
-        
+        if not coin:
+            summary_labels["market"].configure(text="대상: 코인을 입력하세요", text_color=COLOR_MUTED)
+            return
+            
+        try:
+            start_price = float(entry_price.get())
+            max_rounds = int(entry_rounds.get())
+            buy_gap = float(entry_buy_gap.get())
+            sell_gap = float(entry_sell_gap.get())
+            buy_mode_val = buy_mode.get()
+            sell_mode_val = sell_mode.get()
+        except ValueError:
+            return
+
         market = f"KRW-{coin}"
         tick = get_tick_size(market)
-        
-        # 재시작 차수의 매수/매도가 계산
-        raw_buy_price = calculate_price(start_price, buy_gap * (resume_level - 1), buy_mode_val, 'down')
-        raw_sell_price = calculate_price(raw_buy_price, sell_gap, sell_mode_val, 'up')
-        buy_price = math.floor(raw_buy_price / tick) * tick
-        sell_price = math.floor(raw_sell_price / tick) * tick
-        
-        # 이전 차수 매도가 계산 (resume_level - 1차)
-        prev_sell_price = None
-        if resume_level > 1:
-            prev_raw_buy_price = calculate_price(start_price, buy_gap * (resume_level - 2), buy_mode_val, 'down')
-            prev_raw_sell_price = calculate_price(prev_raw_buy_price, sell_gap, sell_mode_val, 'up')
-            prev_sell_price = math.floor(prev_raw_sell_price / tick) * tick
-        
-        # 현재가 조회
         current_price = get_current_price(market)
         
-        if current_price:
-            # 즉시 체결 위험 판단
-            if current_price <= buy_price:
-                info = f"⚠️ 위험: {resume_level}차 매수({buy_price:,.0f}) 즉시체결!"
-                summary_labels["market"].configure(text=info, text_color="#FF4B4B")
-            elif prev_sell_price and current_price >= prev_sell_price:
-                info = f"⚠️ 위험: {resume_level-1}차 매도({prev_sell_price:,.0f}) 즉시체결!"
-                summary_labels["market"].configure(text=info, text_color="#FF4B4B")
+        if not current_price:
+            summary_labels["market"].configure(text="⚠️ 현재가 조회 불가", text_color="orange")
+            return
+
+        # 1. 현재가 기준 권장 차수 계산
+        recommended_level = 1
+        for lv in range(1, max_rounds + 1):
+            lv_buy_raw = calculate_price(start_price, buy_gap * (lv - 1), buy_mode_val, 'down')
+            lv_buy = math.floor(lv_buy_raw / tick) * tick
+            
+            # 이전 차수 매도가 (lv가 1이면 시작가 기준)
+            if lv == 1:
+                upper_bound = start_price + (tick * 10) # 넉넉하게
             else:
-                info = f"✅ {resume_level}차 매수: {buy_price:,.0f} | 현재가: {current_price:,.0f}"
-                summary_labels["market"].configure(text=info, text_color=COLOR_ACCENT)
+                prev_buy_raw = calculate_price(start_price, buy_gap * (lv - 2), buy_mode_val, 'down')
+                prev_buy = math.floor(prev_buy_raw / tick) * tick
+                prev_sell_raw = calculate_price(prev_buy, sell_gap, sell_mode_val, 'up')
+                upper_bound = math.floor(prev_sell_raw / tick) * tick
+            
+            if lv_buy <= current_price <= upper_bound:
+                recommended_level = lv
+                break
+            elif current_price < lv_buy:
+                recommended_level = lv # 더 내려간 경우
+
+        # 2. 유저가 입력한 재시작 차수 검증
+        resume_level_val = entry_resume_level.get().strip()
+        
+        # 입력값이 없으면 권장 차수만 안내
+        if not resume_level_val or resume_level_val == "0":
+            summary_labels["market"].configure(
+                text=f"💡 권장 재시작: {recommended_level}차 (현재가 {current_price:,.0f})", 
+                text_color="#7B9FFF"
+            )
+            if not running_flag: btn_start.configure(state="normal")
+            return
+
+        resume_level = int(resume_level_val)
+        
+        # 선택한 차수의 가격 계산
+        target_buy_raw = calculate_price(start_price, buy_gap * (resume_level - 1), buy_mode_val, 'down')
+        target_buy = math.floor(target_buy_raw / tick) * tick
+        
+        prev_sell = None
+        if resume_level > 1:
+            p_buy_raw = calculate_price(start_price, buy_gap * (resume_level - 2), buy_mode_val, 'down')
+            p_buy = math.floor(p_buy_raw / tick) * tick
+            p_sell_raw = calculate_price(p_buy, sell_gap, sell_mode_val, 'up')
+            prev_sell = math.floor(p_sell_raw / tick) * tick
+
+        # 검증 로직
+        is_safe = True
+        status_msg = ""
+        
+        if current_price <= target_buy:
+            is_safe = False
+            status_msg = f"❌ {resume_level}차 매수({target_buy:,.0f}) 이하! 즉시체결 위험"
+        elif prev_sell and current_price >= prev_sell:
+            is_safe = False
+            status_msg = f"❌ {resume_level-1}차 매도({prev_sell:,.0f}) 이상! 즉시체결 위험"
         else:
-            summary_labels["market"].configure(text=f"📊 {resume_level}차 매수: {buy_price:,.0f}", text_color="yellow")
-    
-    except Exception:
-        summary_labels["market"].configure(text="대상: -", text_color=COLOR_MUTED)
+            status_msg = f"✅ {resume_level}차 시작 가능 (매수: {target_buy:,.0f})"
+
+        # UI 반영
+        summary_labels["market"].configure(text=status_msg, text_color=COLOR_ACCENT if is_safe else "#FF4B4B")
+        
+        if not running_flag:
+            btn_start.configure(state="normal" if is_safe else "disabled")
+            
+    except Exception as e:
+        print(f"[DEBUG] update_resume_price_info error: {e}")
+        summary_labels["market"].configure(text="대상: 데이터 확인 중...", text_color=COLOR_MUTED)
 
 
 # 구분선
@@ -788,6 +831,7 @@ entry_price.bind("<KeyRelease>", update_resume_price_info)
 # 이벤트 바인딩
 entry_market.bind("<KeyRelease>", update_resume_price_info)
 entry_price.bind("<KeyRelease>", update_resume_price_info)
+entry_rounds.bind("<KeyRelease>", update_resume_price_info)
 entry_buy_gap.bind("<KeyRelease>", update_resume_price_info)
 entry_sell_gap.bind("<KeyRelease>", update_resume_price_info)
 entry_resume_level.bind("<KeyRelease>", update_resume_price_info)
