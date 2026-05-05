@@ -29,6 +29,16 @@ from utils.logger import append_trade_log, load_trade_history, get_profit_stats
 from utils.log_config import logger
 from shared.state import update_strategy_info, update_strategy_info_batch, get_strategy_info
 
+def calculate_price(base_price, gap_value, mode, direction):
+    """가격을 퍼센트 또는 고정 금액으로 계산 (헬퍼 함수)"""
+    if mode == 'percent':
+        rate = (1 + gap_value / 100) if direction == 'up' else (1 - gap_value / 100)
+        return round(base_price * rate, 2)
+    elif mode == 'price':
+        return round(base_price + gap_value, 2) if direction == 'up' else round(base_price - gap_value, 2)
+    else:
+        raise ValueError("mode는 'percent' 또는 'price' 여야 합니다.")
+
 class GridLevel:
     """각 차수의 매수/매도 가격과 상태를 관리하는 클래스"""
     def __init__(self, level, buy_price, sell_price, volume):
@@ -96,22 +106,12 @@ class AutoTradeManager:
         self.fast_mode_ticks = 0
         self.telegram_bot = None
 
-    def calculate_price(self, base_price, gap_value, mode, direction):
-        """가격을 퍼센트 또는 고정 금액으로 계산"""
-        if mode == 'percent':
-            rate = (1 + gap_value / 100) if direction == 'up' else (1 - gap_value / 100)
-            return round(base_price * rate, 2)
-        elif mode == 'price':
-            return round(base_price + gap_value, 2) if direction == 'up' else round(base_price - gap_value, 2)
-        else:
-            raise ValueError("mode는 'percent' 또는 'price' 여야 합니다.")
-
     def initialize_levels(self):
         """차수별 그리드 레벨 생성"""
         self.levels = []
         for i in range(self.max_levels):
-            raw_buy_price = self.calculate_price(self.start_price, self.buy_gap * i, self.buy_mode, 'down')
-            raw_sell_price = self.calculate_price(raw_buy_price, self.sell_gap, self.sell_mode, 'up')
+            raw_buy_price = calculate_price(self.start_price, self.buy_gap * i, self.buy_mode, 'down')
+            raw_sell_price = calculate_price(raw_buy_price, self.sell_gap, self.sell_mode, 'up')
             
             buy_price = math.floor(raw_buy_price / self.tick) * self.tick
             sell_price = math.floor(raw_sell_price / self.tick) * self.tick
