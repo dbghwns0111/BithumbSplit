@@ -1,0 +1,22 @@
+# AutoBitTrade/.gitignore
+
+# Build artifacts
+dist/
+build/bithumbSplit/
+
+# Logs
+*.log
+logs/
+
+# Environment and IDE
+.env
+.vscode/
+.idea/
+*.spec
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.ipynb_checkpoints/

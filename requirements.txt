@@ -1,0 +1,11 @@
+pyinstaller==6.14.2
+pefile==2023.2.7
+pywin32-ctypes
+altgraph
+customtkinter
+requests
+PyJWT
+python-dotenv
+flask
+pystray
+Pillow
