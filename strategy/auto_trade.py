@@ -666,6 +666,7 @@ class AutoTradeManager:
 
 def run_auto_trade(**kwargs):
     """하위 호환성을 위한 래퍼 함수"""
+    resume_level = kwargs.pop('resume_level', 0)
     manager = AutoTradeManager(**kwargs)
-    manager.resume_or_init(resume_level=kwargs.get('resume_level', 0))
+    manager.resume_or_init(resume_level=resume_level)
     manager.run()
