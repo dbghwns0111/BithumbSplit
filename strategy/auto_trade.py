@@ -17,7 +17,7 @@ else:
 if str(base_path) not in sys.path:
     sys.path.insert(0, str(base_path))
 
-from api.api import place_order, get_order_detail, cancel_order_by_uuid, get_current_price, get_order_list
+from api.api import place_order, get_order_detail, cancel_order_by_uuid, get_current_price, get_order_list, cancel_all_orders
 from config.tick_table import get_tick_size
 from config.settings import FEE_RATE, HEALTH_CHECK_INTERVAL, SLEEP_SEC, MULTI_ORDER_COUNT
 from utils.telegram import (
